@@ -4,4 +4,4 @@
 .vscode/launch.json
 .vscode/ipch
 build
-!build/*.uf2
+!build/oXs.uf2
