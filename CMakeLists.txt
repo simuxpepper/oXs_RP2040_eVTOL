@@ -29,7 +29,8 @@ pico_generate_pio_header(oXs  ${CMAKE_CURRENT_LIST_DIR}/src/uart_sport_tx_rx.pio
 pico_generate_pio_header(oXs  ${CMAKE_CURRENT_LIST_DIR}/src/uart_srxl2_tx_rx.pio )
 pico_generate_pio_header(oXs  ${CMAKE_CURRENT_LIST_DIR}/src/uart_exbus_tx_rx.pio )
 
-add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
+add_subdirectory(lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI lib/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI/build)
+add_subdirectory(lib/hx711 lib/hx711/build)
 
 file(GLOB oXs_SRC CONFIGURE_DEPENDS "src/*.h" "src/*.cpp")
 
@@ -47,6 +48,7 @@ target_link_libraries(oXs PRIVATE
         hardware_adc
         hardware_pwm
         FatFs_SPI
+        hx711-pico-c
         )
 
 #enable printf on usb

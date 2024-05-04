@@ -100,7 +100,7 @@ void VARIO::calculateAltVspeed(float baroAltitudeCm , int32_t baro_altIntervalMi
     altMillis = millisRp() ;
     if ( (altMillis - lastAltMillis) > 200){
         lastAltMillis = altMillis;
-        sent2Core0(RELATIVEALT, smoothRelAltitudeCm) ;    
+        sent2Core0(RELATIVEALT, smoothRelAltitudeCm) ;
     } 
 }
 
@@ -126,7 +126,7 @@ void VARIO::calculateVspeedDte () {  // is calculated about every 2O ms each tim
         // compensation (m) = airspeed * airspeed / 2 / 9.81 =
         //                  = 2 * 287.05 * difPressurePa * (temperature Celsius + 273.15) / pressure pa /2 /9.81 (m/sec) = 29.26 * difPressureAdc * Temp(kelv) / Press (Pa)
         // compensation (cm) =  2926.0 * difPressureAdc * Temp(kelv) / Press (Pa)
-    if (ms4525.airspeedInstalled == false && sdp3x.airspeedInstalled == false && xgzp6897d.airspeedInstalled == false) return; // skip when no MS4525/sdp3x is installed
+    if (ms4525.airspeedInstalled == false && sdp3x.airspeedInstalled == false) return; // skip when no MS4525/sdp3x is installed
     if (newClimbRateAvailableForCompensation == false) return; // skip when no new Vspeed is available
     newClimbRateAvailableForCompensation = false; // reset the flag
     // calculate average diff of pressure because MS4525 is read more ofen than Vspeed

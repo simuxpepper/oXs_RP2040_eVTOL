@@ -53,19 +53,22 @@
 #define P_ROLL 30
 #define P_YAW 200
 #define P_RPM 80
-#define P_ADS_1_1 200
-#define P_ADS_1_2 200
-#define P_ADS_1_3 200
-#define P_ADS_1_4 200
+#define P_ADS_1_1 10
+#define P_ADS_1_2 10
+#define P_ADS_1_3 10
+#define P_ADS_1_4 10
 #define P_ADS_2_1 200
 #define P_ADS_2_2 200
 #define P_ADS_2_3 200
 #define P_ADS_2_4 200
 #define P_AIRSPEED 30
+#define P_AIRSPEED_2 30
 #define P_AIRSPEED_COMPENSATED_VSPEED 10
 #define P_SBUS_HOLD_COUNTER 100
 #define P_SBUS_FAILSAFE_COUNTER 100
 #define P_GPS_CUMUL_DIST 200  
+#define P_LOAD_CELL_1 200
+#define P_LOAD_CELL_2 200
 
 // -------------- for ELRS protocol  ------------------------------
 #define VOLTAGE_FRAME_INTERVAL 500 // This version transmit only one voltage; it could be change in the future

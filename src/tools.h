@@ -53,11 +53,23 @@ enum fieldIdx {     // Internal Id for the measurements stored in oXs and that c
       ADS_2_3,      // Voltage provided by ads1115 nr 2 on pin 3    30
       ADS_2_4,      // Voltage provided by ads1115 nr 2 on pin 4
       AIRSPEED,
+      AIRSPEED_2,
       AIRSPEED_COMPENSATED_VSPEED,
       SBUS_HOLD_COUNTER,
 
       SBUS_FAILSAFE_COUNTER,                                        // 35        
-      GPS_CUMUL_DIST,   
+      GPS_CUMUL_DIST,
+      LOAD_CELL_1,  // HX711 Load cell 1
+      LOAD_CELL_2,  // HX711 Load cell 2
+      
+      //TX Controls
+      THROTTLE,
+      AILERON,
+      ELEVATOR,
+      RUDDER,
+      AUX_1,
+      AUX_2,
+
       NUMBER_MAX_IDX, // used to count the number of entries       
 };
 // note : when a new field is added to this list we have to change also:
@@ -98,6 +110,7 @@ void startTimerUs(uint8_t idx);
 void getTimerUs(uint8_t idx);
 
 void calculateAirspeed();
+void calculateAirspeed2();
 
 void fillFields( uint8_t forcedFields);
 

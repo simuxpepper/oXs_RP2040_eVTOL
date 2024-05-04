@@ -4,7 +4,7 @@
 #include "crsf_frames.h"
 
 #define CONFIG_VERSION 6
-struct CONFIG{
+/*struct CONFIG{
     uint8_t version = CONFIG_VERSION;
     uint8_t pinChannels[16] = {0XFF};
     uint8_t pinGpsTx = 0xFF;
@@ -45,6 +45,55 @@ struct CONFIG{
     uint8_t temperature; 
     uint8_t VspeedCompChannel;
     uint8_t ledInverted;
+};*/ //OLD CONFIG
+
+struct CONFIG{
+    uint8_t version = CONFIG_VERSION;
+    uint8_t pinChannels[16] = {0XFF};
+    uint8_t pinGpsTx = 29;
+    uint8_t pinGpsRx = 0;
+    uint8_t pinPrimIn = 5;
+    uint8_t pinSecIn = 0xFF; 
+    uint8_t pinSbusOut = 1;
+    uint8_t pinTlm = 2;
+    uint8_t pinVolt[4] = {0xFF};
+    uint8_t pinSda = 14;
+    uint8_t pinScl = 15;
+    uint8_t pinRpm = 0xFF;
+    uint8_t pinLed = 16;
+    uint8_t protocol = 'S' ; // S = Sport, C = crossfire, J = Jeti
+    uint32_t crsfBaudrate = 420000;
+    float scaleVolt1 = 1.0;
+    float scaleVolt2 = 1.0;
+    float scaleVolt3 = 1.0;
+    float scaleVolt4 = 1.0;
+    float offset1 = 0.0;
+    float offset2 = 0.0;
+    float offset3= 0.0;
+    float offset4 = 0.0;
+    uint8_t gpsType = 'U' ;
+    float rpmMultiplicator = 1;
+    //uint8_t gpio0 = 0; // 0 mean SBUS, 1 up to 16  = a RC channel
+    //uint8_t gpio1 = 1;
+    //uint8_t gpio5 = 6;
+    //uint8_t gpio11 = 11;
+    uint8_t failsafeType = 'H';
+    crsf_channels_s failsafeChannels ;
+    int16_t accOffsetX;
+    int16_t accOffsetY;
+    int16_t accOffsetZ;
+    int16_t gyroOffsetX;
+    int16_t gyroOffsetY;
+    int16_t gyroOffsetZ;
+    uint8_t temperature; 
+    uint8_t VspeedCompChannel;
+    uint8_t ledInverted;
+    uint8_t loadclk = 255;
+    uint8_t loaddata = 255;
+    int32_t load1_m = 1;
+    int32_t load1_c = 0;
+    int32_t load2_m = 1;
+    int32_t load2_c = 0;
 };
 
 void handleUSBCmd(void);
@@ -62,6 +111,7 @@ void checkConfig();
 void setupConfig();
 void printConfig();
 void requestMpuCalibration();
+void requestHXCalibration();
 void printConfigOffsets();
 void printFieldValues();
 void printPwmValues();

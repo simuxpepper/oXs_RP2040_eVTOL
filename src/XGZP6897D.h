@@ -30,9 +30,14 @@ class XGZP6897D
     //  The raw integer value of pressure must be devided by the K factor to convert in Pa.
     //void readRawSensor(int16_t &rawTemperature, int32_t &rawPressure);
     void getDifPressure();
+    bool calibrated = false;
   private:
     float _K;
     uint8_t _address;
+    
+    int64_t difPressureCalSum = 0;  // use to calibrate the sensor at reset
+    int calibrateCount = 0;
+    float offset ;
     
     uint8_t readBuffer[5];                 // get 2 bytes returned by SDP3X
     uint32_t prevReadUs ;

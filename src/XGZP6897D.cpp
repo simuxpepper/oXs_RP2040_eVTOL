@@ -18,12 +18,12 @@
 #include <math.h>
 
 extern CONFIG config;
-extern float actualPressurePa; // this value is updated when baro1,2 or 3 is installed
-extern float difPressureAirspeedSumPa; // calculate a moving average on x values
-extern uint32_t difPressureAirspeedCount;
-extern float difPressureCompVspeedSumPa; // calculate a moving average on x values
-extern uint32_t difPressureCompVspeedCount;
-extern float temperatureKelvin;     // in Kelvin , used when airspeed is calculated
+extern float actualPressurePa2; // this value is updated when baro1,2 or 3 is installed
+extern float difPressureAirspeedSumPa2; // calculate a moving average on x values
+extern uint32_t difPressureAirspeedCount2;
+extern float difPressureCompVspeedSumPa2; // calculate a moving average on x values
+extern uint32_t difPressureCompVspeedCount2;
+extern float temperatureKelvin2;     // in Kelvin , used when airspeed is calculated
 
 //  Descriptor. K depends on the exact model of the sensor. See datasheet and documentation
 XGZP6897D::XGZP6897D(uint16_t K)
@@ -37,10 +37,10 @@ void XGZP6897D::begin()
   airspeedInstalled = false;
   if ( config.pinScl == 255 or config.pinSda == 255) return; // skip if pins are not defined
   
-  //uint8_t readBuffer[9];
+  uint8_t readBuffer[5] = {0,0,0,0,0};
   int32_t i2cError;
   
-  // set the sensor in continous mode with averaging (send a command 0X3615)
+  // set the sensor in continous mode with averaging (send a command 0X30 0X0A)
   uint8_t cmdData[2] = {0X30 , 0X0A} ; 
   if ( i2c_write_timeout_us (i2c1 , _address, &cmdData[0] , 2 , true , 1000) <0 ) {
       printf("error write command to xgzp6897d\n");
@@ -48,6 +48,9 @@ void XGZP6897D::begin()
   }
   sleep_ms(100);
 
+  uint8_t readCmd[1];
+  readCmd[0] = 0X06;
+  i2c_write_timeout_us (i2c1 , _address, &readCmd[0] , 1 , true , 1000);
   i2cError =  i2c_read_timeout_us (i2c1 , _address , &readBuffer[0] , 5 , true, 5500) ;    
   if (i2cError < 0) {
       printf("read 5 bytes from xgzp6897d = %d \n", (int) i2cError);    
@@ -56,11 +59,10 @@ void XGZP6897D::begin()
   // first 3 bytes = pressure, byte 4 & 5 = temp
   //nextPressureReadMillis = millisRp() + 2;    //
   //nextAirSpeedMillis  = nextPressureReadMillis + 200 ; 
-  temperatureCelsius =   ((float)(( (((int16_t)readBuffer[3]) << 8) & 0X7F00)  | readBuffer[4])) / 256.0  ;
-  temperatureKelvin = 273.15 + temperatureCelsius ; // in Kelvin
-  //dpScaleSdp3x =  966.0 / 1013.25 / ((float)((int16_t)readBuffer[6] << 8 | readBuffer[7]));
-  // datasheet says that we have to apply a correction of 966/actual pressure in mbar; it is estimated with 1013
-
+  temperatureCelsius = ((float) (( ((readBuffer[3]) << 8) & 0X7F00) | readBuffer[4])) / 256.0  ;
+  temperatureKelvin2 = 273.15 + temperatureCelsius ; // in Kelvin
+  
+  printf("xgzp6897d temp celsius: %d\n", (uint16_t) temperatureCelsius);
   printf("xgzp6897d has been succesfuly detected\n");
   airspeedInstalled = true;
   prevReadUs = microsRp(); 
@@ -72,20 +74,70 @@ void XGZP6897D::begin()
 void XGZP6897D::getDifPressure()
  {
   if ( ! airspeedInstalled) return ;     // do not process if there is no sensor
-    uint32_t now = microsRp();
-    if ( (now - prevReadUs) < 2000 ) return ;// it takes about 500 usec for a conversion
-    // read a new pressure
-    prevReadUs = now;
-    if ( i2c_read_timeout_us (i2c1 , _address , &readBuffer[0] , 5 , true, 1500) < 0)  {
-        printf("error read xgzp6897d (airspeed sensor)\n");
-        return;
+  
+  uint32_t now = microsRp();
+  if ( (now - prevReadUs) < 2000 ) return ;// it takes about 2000 usec for a conversion
+  // read a new pressure
+  prevReadUs = now;
+
+  uint8_t cmdData[2] = {0X30, 0X0A} ;
+  if ( i2c_write_timeout_us (i2c1 , _address, &cmdData[0] , 2 , true , 1000) <0 ) {
+      printf("error write command to xgzp6897d\n");
+      return ; 
   }
 
-  difPressurePa =  (float) ((int32_t) ((readBuffer[0] & 0X7F) << 16 | (readBuffer[1] & 0X00FF) << 8 | readBuffer[2] & 0X0000FF)) / _K; // diffPressure in pa
-  difPressureAirspeedSumPa += difPressurePa; // calculate a moving average on x values
-  difPressureAirspeedCount++;                // count the number of conversion
-  difPressureCompVspeedSumPa += difPressurePa; // calculate a moving average on x values
-  difPressureCompVspeedCount++;                // count the number of conversion
+  uint8_t check[1];
+  if ( i2c_read_timeout_us (i2c1 , _address , &check[0] , 1 , true, 1500) < 0)  {
+      printf("error read xgzp6897d (airspeed sensor)\n");
+      return;
+  }
+  
+  if ((check[0] & 0x08) > 0) {
+    //printf("Not ready yet \n");
+    return;
+  }
+  uint8_t cmdData2[1];
+  cmdData2[0] = 0X06;
+  if ( i2c_write_timeout_us (i2c1 , _address, &cmdData2[0] , 1 , true , 1000) <0 ) {
+      printf("error write command to xgzp6897d\n");
+      return ; 
+  }
+  uint8_t readBuffer[5];
+  if ( i2c_read_timeout_us (i2c1 , _address , &readBuffer[0] , 5 , true, 1500) < 0)  {
+      printf("error read xgzp6897d (airspeed sensor)\n");
+      return;
+  }
+  
+  uint32_t difPressureAdc =  ((uint32_t) (((readBuffer[0] & 0X7F) << 16) + ((readBuffer[1] & 0X00FF) << 8) + (readBuffer[2] & 0X0000FF))); // diffPressure in pa
+  //temperatureCelsius =   ((float)(( (((int16_t)readBuffer[3]) << 8) & 0X7F00)  | readBuffer[4])) / 256.0  ;
+  //temperatureKelvin2 = 273.15 + temperatureCelsius ; // in Kelvin
+
+  if ( calibrated == false) {
+        calibrateCount++ ;
+        if (calibrateCount == 1200 ) { // after 100 reading , we can calculate the offset 
+            offset =  (  ((float) difPressureCalSum) / 200 ) ; //there has been 32 reading (64-32)  
+            printf("XGZP6897D calibrated, offset = %.4f\n", offset);
+            calibrated = true ;
+        } else if  (calibrateCount >= 1000){ // after 1000 reading, we can start cummulate the ADC values in order to calculate the offset 
+            difPressureCalSum += difPressureAdc ;
+        } // end calibration
+        else if (calibrateCount == 500) printf("Calibrating XGZP6897D...\n");
+        else return;
+  }  else { // sensor is calibrated
+
+  if (difPressureAdc < (offset / 20)) difPressureAdc += 8388608;
+
+    difPressurePa = (((float) difPressureAdc) - offset) / _K ;
+    //printf("Diff Pressure = %.2f Pa\n", difPressurePa);
+    //printf("Abs = %d Pa\n",  (uint32_t) (difPressureAdc));
+    //printf("Abs Pressure = %d Pa\n",  (uint32_t) (difPressureAdc / _K));
+    //printf("Temp = %.2f C\n", temperatureCelsius); 
+
+    difPressureAirspeedSumPa2 += difPressurePa; // calculate a moving average on x values
+    difPressureAirspeedCount2++;                // count the number of conversion
+    difPressureCompVspeedSumPa2 += difPressurePa; // calculate a moving average on x values
+    difPressureCompVspeedCount2++;                // count the number of conversion
+    }
  }
 /*
   int32_t pressure_adc;

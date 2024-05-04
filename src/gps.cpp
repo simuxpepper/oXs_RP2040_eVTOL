@@ -252,7 +252,7 @@ void GPS::handleGpsUblox(){
             if ((microsRp() - lastActionUs ) > 3000000) { // wait at least  4mse between baudrate change 
                 uart_tx_program_init(gpsPio, gpsSmTx, gpsOffsetTx, config.pinGpsRx, 38400); 
                 //sleep_ms(2); // to avoid perhaps a pulse due to change of baudrate
-                //pio_sm_put (gpsPio, gpsSmTx, (uint32_t) 0 ); // send a dummy char to avoid glitch
+                pio_sm_put (gpsPio, gpsSmTx, (uint32_t) 0 ); // send a dummy char to avoid glitch
                 //sleep_ms(10); // wait to be sure the char is sent and line goes high again.
                 initGpsIdx = 0; // reset on the first char of the first command to be sent
                 while (initGpsIdx < sizeof( initGpsM10)) {
@@ -499,7 +499,7 @@ bool GPS::parseGpsUblox(void) // move the data from buffer to the different fiel
                 sent2Core0(GPS_DATE , gpsDate);
                 sent2Core0(GPS_TIME , gpsTime);
                 datetime_t gps_t = {
-                    .year = static_cast<int16_t>(gpsDate >> 24) + 2000,
+                    .year = (int16_t) (static_cast<int16_t>(gpsDate >> 24) + 2000),
                     .month = static_cast<int8_t>(gpsDate >> 16),
                     .day = static_cast<int8_t>(gpsDate >> 8),
                     //.dotw = 0,  // 0 is Sunday, so 5 is Friday

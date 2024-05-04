@@ -357,7 +357,7 @@ bool MPU::getAccZWorld(){ // return true when a value is available ; read the IM
         sent2Core0( VSPEED , (int32_t) vario1.compensatedVpseed) ;     
     }
     now_ms = millisRp(); //time to print?
-    if (now_ms - last_ms >= 500) {
+    if (now_ms - last_ms >= 50) {
         last_ms = now_ms;
         sent2Core0( PITCH , (int32_t) pitch ) ; 
         sent2Core0( ROLL , (int32_t) roll ) ; 

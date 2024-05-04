@@ -13,7 +13,7 @@
 
 #define IS_RGBW false // no white led are on the RP2040-zero board
 
-PIO rgbPio = pio1;
+PIO rgbPio = pio0;
 uint rgbSm  = 3;
 uint8_t rgbPin = 16;  // RP2040 zero uses a rgb neopixel on pin 16
 uint8_t rgbRed;

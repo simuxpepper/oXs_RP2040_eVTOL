@@ -45,6 +45,16 @@
 #include "sd_card.h"
 #include "ff.h"
 
+#include "teensy.h"
+TEENSY teensy(9);
+
+//include hx711 load cell library
+#include "hx711.h"
+#include "hx711_multi.h"
+#include "common.h"
+hx711_multi_t hxm;
+hx711_multi_config_t hxmcfg;
+
 // to do : add rpm, temp telemetry fields to jeti protocol
 //         support ex bus jeti protocol on top of ex jeti protocol (not sure it makes lot of sense because bandwitdth is limited)
 //         add switching 8 gpio from one channel
@@ -97,7 +107,7 @@ SDP3X sdp3x( (uint8_t) SDPXX_ADDRESS) ;      // 0X21 is the default I2C address 
 
 //XGZP6897D
 #include "XGZP6897D.h"
-XGZP6897D xgzp6897d (8192);
+XGZP6897D xgzp6897d (4096);
 
 
 VARIO vario1;
@@ -182,6 +192,266 @@ void setupI2c(){
     gpio_pull_up(config.pinScl); 
 }
 
+#include <math.h>
+void setupLoadCell() {
+
+  if (config.loadclk == 255 || config.loaddata == 255) {
+    hxm.installed = 0;
+    return;
+  }
+
+  uint8_t loadcellCount = 2; //change this value to change number of load cells, default is 2.
+  hx711_multi_get_default_config(&hxmcfg);
+  hxmcfg.clock_pin = config.loadclk;
+  hxmcfg.data_pin_base = config.loaddata;
+  hxmcfg.chips_len = loadcellCount;
+  hxmcfg.pio_irq_index = 1;
+  hxmcfg.dma_irq_index = 1;
+
+
+  // 1. initialise
+  printf("Initializing HX711\n");
+
+  hx711_multi_init(&hxm, &hxmcfg);
+  printf("Successfully initialized HX711\n");
+  printf("Load cell clock pin: %d\n", hxmcfg.clock_pin);
+  printf("Load cell data pin: %d\n", hxmcfg.data_pin_base);
+  printf("Load cell count: %d\n", hxmcfg.chips_len);
+
+  hxm.installed = 1;
+  //sleep_ms(100);
+  hxm.started = 0;
+
+  // 2. Power up the HX711 chips and set gain on each chip
+  printf("Powering up HX711\n");
+  
+  hx711_multi_power_up(&hxm, hx711_gain_128);
+  printf("Powered up HX711\n");
+
+  //3. This step is optional. Only do this if you want to
+  //change the gain AND save it to each HX711 chip
+  //
+  //hx711_multi_set_gain(&hxm, hx711_gain_64);
+  //hx711_multi_power_down(&hxm);
+  //hx711_wait_power_down();
+  //hx711_multi_power_up(&hxm, hx711_gain_64);
+
+  // 4. Wait for readings to settle
+  printf("Settling\n");
+  hx711_wait_settle(hx711_rate_80);
+
+  //printf("Syncing HX711\n");
+  //hx711_multi_sync(&hxm, hx711_gain_128);
+  //printf("Synced HX711\n");
+
+  // 5. Read values
+
+  
+  int32_t arr[hxmcfg.chips_len];
+
+  printf("Starting multi async\n");
+
+  /*hx711_multi_async_start(&hxm);
+
+  printf("Next\n");
+  while(!hx711_multi_async_done(&hxm)) {
+
+  printf("Async not done\n");
+  sleep_ms(500);
+  }
+
+  hx711_multi_async_get_values(&hxm, arr);
+  printf("Values: %d, %d\n", arr[0],arr[1]);
+  */
+
+  // 6. Stop communication with all HX711 chips
+  //hx711_multi_close(&hxm);
+}
+
+void getloadCell() {
+  int32_t arr[hxmcfg.chips_len]; //replace with sensor array
+  static uint32_t lastLoaduS;
+  if ( ( microsRp() - lastLoaduS) < 100000) return; // perform calculation only every 100 msec 
+  
+  lastLoaduS = microsRp();
+
+  //printf("Starting hx\n");
+  if (!hxm.started) hx711_multi_async_start(&hxm);
+  if(!hx711_multi_async_done(&hxm)){
+      hxm.started = 1;
+      //printf("ASYNC NOT DONE\n");
+  }
+  else {
+      //printf("ASYNC DONE\n");
+      hx711_multi_async_get_values(&hxm, arr);
+      //printf("Load cell values:\nCell 1: %d\nCell 2: %d\n", arr[0],arr[1]);
+      hxm.started = 0;
+      sent2Core0(LOAD_CELL_1, arr[0]); //formula, find mpucal y0 = mVal * arr[0] + cVal
+      sent2Core0(LOAD_CELL_2, arr[1]);
+
+      //hx711_multi_async_start(&hxm);
+      //hxm.started = 1;
+  }
+}
+
+bool calLoad = false;
+
+void calibrateLoadCell() {
+  printf("Calibrating HX711...\nSet load cell in straight and level position and enter load cell number.\n");
+  int c;
+  int buf[10];
+  uint8_t bufPos = 0;
+  int32_t calibC = 0;
+  int32_t minVal = 0;
+  int32_t maxVal = 0;
+  int32_t calibTemp = 0;
+  int32_t calibM = 0;
+  uint8_t cellSel;
+  int16_t loadVal = 0;
+
+  while (1) {
+      c = getchar_timeout_us(5);
+      //printf("%X\n", (uint8_t) c);
+      
+      if ( c== PICO_ERROR_TIMEOUT) continue;
+      //printf("%X\n", (uint8_t) c);
+      
+      if ( c != '\n') {
+          buf[bufPos++] = c & 0xFF; // save the char
+        // printf("%c\n", (uint8_t) c);
+      } else {
+          buf[bufPos] = 0x00 ; // put the char end of string
+          bufPos = 0;                // reset the position
+          break;
+      }
+  }
+  printf("Calibrating load cell %c\n", buf[0]);
+  if (buf[0] == '1') cellSel = LOAD_CELL_1;
+  else if (buf[0] == '2') cellSel = LOAD_CELL_2;
+  else {
+    printf("Invalid Input! Exiting calibration...\n");
+    return;
+  }
+  for (int x = 0; x < 10; x++) {
+    getloadCell();
+    sleep_ms(120);
+    if (x == 1) {
+      maxVal = fields[cellSel].value;
+      minVal = fields[cellSel].value;
+    }
+    if (x % 2 == 1) {
+      calibC += fields[cellSel].value;
+      if (fields[cellSel].value > maxVal) maxVal = fields[cellSel].value;
+      if (fields[cellSel].value < minVal) minVal = fields[cellSel].value;
+    }
+  }
+  if ((maxVal - minVal) > 500) {
+    printf("Load cell not steady, exiting calibration.\nmaxVal = %d, minVal = %d",maxVal,minVal);
+    return;
+  }
+  else {
+    calibC = calibC/5;
+  }
+
+  printf("Set load cell in ready position with attachment (no load!) and press enter to proceed.\n");
+  while (1) {
+      c = getchar_timeout_us(5);
+      //printf("%X\n", (uint8_t) c);
+      
+      if ( c== PICO_ERROR_TIMEOUT) continue;
+      //printf("%X\n", (uint8_t) c);
+      
+      if ((c == '\n') || (c == 0x0D)) break;
+  }
+  printf("\n");
+
+  getloadCell();
+  sleep_ms(1000);
+
+  for (int x2 = 0; x2 < 10; x2++) {
+    getloadCell();
+    sleep_ms(120);
+    if (x2 == 1) {
+      maxVal = fields[cellSel].value;
+      minVal = fields[cellSel].value;
+    }
+    if (x2 % 2 == 1) {
+      calibTemp += fields[cellSel].value;
+      if (fields[cellSel].value > maxVal) maxVal = fields[cellSel].value;
+      if (fields[cellSel].value < minVal) minVal = fields[cellSel].value;
+    }
+  }
+  if ((maxVal - minVal) > 500) {
+    printf("Load cell not steady, exiting calibration.\nmaxVal = %d, minVal = %d",maxVal,minVal);
+    return;
+  }
+  else {
+    calibTemp = calibTemp/5;
+  }
+
+  printf("Set load cell in ready position with LOAD and enter load value (in grams) to proceed.\n");
+  while (1) {
+      c = getchar_timeout_us(5);
+      //printf("%X\n", (uint8_t) c);
+      
+      if ( c== PICO_ERROR_TIMEOUT) continue;
+      //printf("%X\n", (uint8_t) c);
+      
+      if ( c != '\n') {
+          buf[bufPos++] = c & 0xFF; // save the char
+        // printf("%c\n", (uint8_t) c);
+      } else {
+          buf[bufPos] = 0x00 ; // put the char end of string
+          //bufPos = 0;                // reset the position
+          break;
+      }
+  }
+  printf("\n");
+  int tPos = bufPos;
+  for (int a = 0; a < tPos; a++) {
+      loadVal += (buf[a]-'0') * ((int) pow((double) 10,bufPos-1));
+      bufPos -= 1;
+  }
+
+  printf("Loadval = %d\n", loadVal);
+
+  getloadCell();
+  sleep_ms(1000);
+  for (int x3 = 0; x3 < 10; x3++) {
+    getloadCell();
+    sleep_ms(120);
+    if (x3 == 1) {
+      maxVal = fields[cellSel].value;
+      minVal = fields[cellSel].value;
+    }
+    if (x3 % 2 == 1) {
+      calibM += fields[cellSel].value;
+      if (fields[cellSel].value > maxVal) maxVal = fields[cellSel].value;
+      if (fields[cellSel].value < minVal) minVal = fields[cellSel].value;
+    }
+  }
+  if ((maxVal - minVal) > 1000) {
+    printf("Load cell not steady, exiting calibration.\nmaxVal = %d, minVal = %d",maxVal,minVal);
+    return;
+  }
+  else {
+    calibM = calibM/5;
+  }
+
+  if(cellSel == LOAD_CELL_1) {
+    config.load1_c = calibC;
+    config.load1_m = (calibM - calibTemp) / loadVal;
+    printf("Calibration completed! m = %d, c = %d.\n",config.load1_m,config.load1_c);
+  }
+  else if(cellSel == LOAD_CELL_2) {
+    config.load2_c = calibC;
+    config.load2_m = (calibM - calibTemp) / loadVal;
+    printf("Calibration completed! m = %d, c = %d.\n",config.load2_m,config.load2_c);
+  }
+  sent2Core0(0XFF, 0XFFFFFFFF); //To save config
+  return;
+}
+
 void setupSensors(){     // this runs on core1!!!!!!!!
       
       //sleep_ms(3000);
@@ -212,17 +482,19 @@ void setupSensors(){     // this runs on core1!!!!!!!!
       //printf("gps done\n");
       ms4525.begin();
       if (! ms4525.airspeedInstalled) {
-        sdp3x.begin();
+      sdp3x.begin();
       }
-      if (! sdp3x.airspeedInstalled) {
-        xgzp6897d.begin();
-      }
+      //if (! sdp3x.airspeedInstalled) {
+      xgzp6897d.begin();
+      //}
+
+      teensy.begin();
+
       #ifdef USEDS18B20
       ds18b20Setup(); 
       #endif
       setupRpm(); // this function perform the setup of pio Rpm
       //printf("rpm done\n");
-      
       core1SetupDone = true;
       //printf("end core1 setup\n") ;    
       //getTimerUs(0);   // xxxxx
@@ -252,17 +524,18 @@ void getSensors(void){      // this runs on core1 !!!!!!!!!!!!
     calculateAirspeed( );
     vario1.calculateVspeedDte();
   }
-  if (sdp3x.airspeedInstalled){
+  else if (sdp3x.airspeedInstalled){
     sdp3x.getDifPressure();
     calculateAirspeed( );
     vario1.calculateVspeedDte();
   } 
   if (xgzp6897d.airspeedInstalled){
     xgzp6897d.getDifPressure();
-    calculateAirspeed( );
-    vario1.calculateVspeedDte();
-  } 
+    calculateAirspeed2( );
+    //vario1.calculateVspeedDte(); //only valid for SDP and MS4525
+  }
   readRpm();
+  teensy.readSensor();
   #ifdef USE_DS18B20
   ds18b20Read(); 
   #endif
@@ -399,7 +672,7 @@ void setupSD(){
     fileNum = int(line[7]-'0') * 10 + int(line[8]-'0');
   }
   else if (int(strlen(line)) == 14) {
-    fileNum = int(line[7]-'0') * 100 + int(line[8]-'0') * 10 * int(line[9]-'0');
+    fileNum = int(line[7]-'0') * 100 + int(line[8]-'0') * 10 + int(line[9]-'0');
   }
   else {
     fr = f_close(&fil);
@@ -430,7 +703,9 @@ void setupSD(){
 
   //Print header for new filename
   fr = f_open(&fil, sdFileName, FA_WRITE | FA_OPEN_APPEND);
-  f_printf(&fil, "LATITUDE,LONGITUDE,GROUNDSPEED,HEADING,ALTITUDE,GPS_DATE,GPS_TIME,GPS_HOME_BEARING,GPS_HOME_DISTANCE,GPS_CUMUL_DIST,VSPEED,RELATIVEALT,PITCH,ROLL,YAW,VTAS,CURR,COMPENSATED_VSPEED,AIRSPEED\n");
+  f_printf(&fil, "SYS_TIME,LATITUDE,LONGITUDE,GROUNDSPEED,HEADING,ALTITUDE,GPS_DATE,GPS_TIME,VSPEED,RELATIVEALT,PITCH,ROLL,YAW,VTAS,CURR,AIRSPEED,AIRSPEED_2,THROTTLE,AILERON,ELEVATOR,RUDDER,AUX_1,AUX_2\n");
+//  f_printf(&fil, "SYS_TIME,LATITUDE,LONGITUDE,GROUNDSPEED,HEADING,ALTITUDE,GPS_DATE,GPS_TIME,GPS_HOME_BEARING,GPS_HOME_DISTANCE,GPS_CUMUL_DIST,VSPEED,RELATIVEALT,PITCH,ROLL,YAW,VTAS,CURR,VREF,COMPENSATED_VSPEED,AIRSPEED,AIRSPEED_2,THROTTLE,AILERON,ELEVATOR,RUDDER,AUX_1,AUX_2,LOAD_CELL_1,LOAD_CELL_2\n");
+
   fr = f_close(&fil);
   /*
   if (fr != FR_OK) {
@@ -494,9 +769,13 @@ void setupSD(){
   */
 }
 
+//FOR DEBUGGING, SD and HX MODE
+bool sd = 1;
+bool hx = 0;
+
 void setup() {
   stdio_init_all();
-  setupSD();
+  if (sd == 1) setupSD();
   bool clockChanged; 
   clockChanged = set_sys_clock_khz(133000, false);
   setupLed();
@@ -590,14 +869,17 @@ void setup() {
       }
       uint32_t core1SetupUs = microsRp() - setup1StartUs ; 
       printf("Setup1 takes %d usec\n",(int) core1SetupUs) ;
+      if (hx == 1) setupLoadCell();
       if ( config.protocol == 'C'){   //crsf
         setupCrsfIn();  // setup one/two uart and the irq handler (for primary Rx) 
         setupCrsf2In();  // setup one/two uart and the irq handler (for secondary Rx) 
         setupCrsfOut(); //  setup 1 pio/sm (for TX ) and the DMA (for TX)   
       } else if (config.protocol == 'S') { // sport
-        setupSbusIn();
-        setupSbus2In();
-        setupSport();
+        if (hx == 0) {
+          setupSbusIn();
+          setupSbus2In();
+          setupSport();
+        }
       } else if (config.protocol == 'J') {   //jeti non exbus
         setupSbusIn();
         setupSbus2In();
@@ -632,11 +914,14 @@ void setup() {
         //setupSbus2Tlm();
       }
       if (config.pinSbusOut != 255) { // configure 1 pio/sm for SBUS out (only if Sbus out is activated in config).
-          setupSbusOutPio();
+          //setupSbusOutPio();
         }
+      //if (hx == 1) setupLoadCell();
       setupPwm();
+      printf("Watchdog\n");
       watchdog_enable(3500, 0); // require an update once every 500 msec
-  } 
+  }
+  printf("Config\n");
   printConfig(); 
   setRgbColorOn(10,0,0); // set color on red (= no signal)
   /*
@@ -691,16 +976,21 @@ void getSensorsFromCore1(){
     if ((forcedFields == 1) || (forcedFields == 2)) fillFields(forcedFields); // force dummy vallues for debuging a protocol
 }
 
+float timer = 0;
 void sendtoSD(){
+
+  if (xgzp6897d.airspeedInstalled && !xgzp6897d.calibrated) return;
+
   static uint32_t lastSDUs;
-  static uint32_t lastSDUs2;
   
-  if ( ( millisRp() - lastSDUs) < 50) return; // perform calculation only every 100 msec 
+  if ( ( millisRp() - lastSDUs) < 50) return; // perform calculation only every 50 msec 
   lastSDUs = millisRp();
 
+/*
+  static uint32_t lastSDUs2;
   if ( ( millisRp() - lastSDUs2) >= 1000){ // perform calculation only every 1000 msec 
     lastSDUs2 = millisRp();
-    /*
+    
     datetime_t curT;
 
     rtc_get_datetime(&curT);
@@ -710,8 +1000,9 @@ void sendtoSD(){
     //printf("SD \n");
     printf("RTC Running2: %d\n", rtc_running());
 
-    */
+    
   }
+  */
 
   FRESULT fr;
   FATFS fs;
@@ -720,10 +1011,11 @@ void sendtoSD(){
   fr = f_mount(&fs, "0:", 1);
   fr = f_open(&fil, sdFileName, FA_WRITE | FA_OPEN_APPEND);
 
-  int logVar[] = {LATITUDE, LONGITUDE, GROUNDSPEED, HEADING, ALTITUDE, GPS_DATE, GPS_TIME, GPS_HOME_BEARING, GPS_HOME_DISTANCE, GPS_CUMUL_DIST, VSPEED, RELATIVEALT, PITCH, ROLL, YAW, ADS_1_1, ADS_1_2, AIRSPEED_COMPENSATED_VSPEED, AIRSPEED};
-  int numOfParams = 19;
-  //printf("\n");
+  f_printf(&fil, "%.2f,", (float) (timer += 0.05));
 
+//  int logVar[] = {LATITUDE, LONGITUDE, GROUNDSPEED, HEADING, ALTITUDE, GPS_DATE, GPS_TIME, GPS_HOME_BEARING, GPS_HOME_DISTANCE, GPS_CUMUL_DIST, VSPEED, RELATIVEALT, PITCH, ROLL, YAW, ADS_2_1, ADS_2_2, ADS_1_3, AIRSPEED_COMPENSATED_VSPEED, AIRSPEED, AIRSPEED_2, THROTTLE,AILERON,ELEVATOR,RUDDER,AUX_1,AUX_2,LOAD_CELL_1, LOAD_CELL_2};
+  int logVar[] = {LATITUDE, LONGITUDE, GROUNDSPEED, HEADING, ALTITUDE, GPS_DATE, GPS_TIME, VSPEED, RELATIVEALT, PITCH, ROLL, YAW, ADS_2_1, ADS_2_2, AIRSPEED, AIRSPEED_2, THROTTLE,AILERON,ELEVATOR,RUDDER,AUX_1,AUX_2};
+  int numOfParams = sizeof(logVar)/sizeof(logVar[0]);
   
   for (uint8_t i=0; i<numOfParams ;i++){
     if (fields[logVar[i]].onceAvailable){
@@ -822,15 +1114,18 @@ void sendtoSD(){
                   break;        
               case ADS_1_3:
                   //printf("Ads 1 3 = %d mVolt\n", (int) fields[i].value) ;
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value); //Voltage Reference
                   break;        
               case ADS_1_4:
                   //printf("Ads 1 4 = %d mVolt\n", (int) fields[i].value) ;
                   break;        
               case ADS_2_1:
                   //printf("Ads 2 1 = %d mVolt\n", (int) fields[i].value) ;
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
                   break;        
               case ADS_2_2:
                   //printf("Ads 2 2 = %d mVolt\n", (int) fields[i].value) ;
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
                   break;        
               case ADS_2_3:
                   //printf("Ads 2 3 = %d mVolt\n", (int) fields[i].value) ;
@@ -842,6 +1137,10 @@ void sendtoSD(){
                   //printf("Airspeed = %d cm/s\n", (int) fields[i].value) ;
                   f_printf(&fil, "%d", (int) fields[logVar[i]].value);
                   break;
+              case AIRSPEED_2:
+                  //printf("Airspeed = %d cm/s\n", (int) fields[i].value) ;
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
               case AIRSPEED_COMPENSATED_VSPEED:
                   //printf("Compensated Vspeed = %d cm/s\n", (int) fields[i].value) ;
                   f_printf(&fil, "%d", (int) fields[logVar[i]].value);
@@ -850,6 +1149,32 @@ void sendtoSD(){
                   //printf("Gps cumulative distance = %d\n", (int) fields[i].value) ;
                   f_printf(&fil, "%d", (int) fields[logVar[i]].value);
                   break;
+              case LOAD_CELL_1 :
+                  f_printf(&fil, "%d", (int) (fields[logVar[i]].value - config.load1_c)/(config.load1_m));
+                  break;
+              case LOAD_CELL_2 :
+                  f_printf(&fil, "%d", (int) (fields[logVar[i]].value - config.load2_c)/(config.load2_m));
+                  break;
+                  //THROTTLE,AILERON,ELEVATOR,RUDDER,AUX_1,AUX_2,
+              case THROTTLE:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+              case AILERON:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+              case ELEVATOR:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+              case RUDDER:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+              case AUX_1:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+              case AUX_2:
+                  f_printf(&fil, "%d", (int) fields[logVar[i]].value);
+                  break;
+
                           
           } // end switch
     }
@@ -873,7 +1198,6 @@ void loop() {
       getSensorsFromCore1();
       mergeSeveralSensors();
       watchdog_update();
-      //sendtoSD();
       if ( config.protocol == 'C'){   //elrs/crsf
         fillCRSFFrame();
         handleCrsfIn();
@@ -929,7 +1253,7 @@ void loop() {
   }
   watchdog_update();
   //if (tud_cdc_connected()) {
-  handleUSBCmd();  // process the commands received from the USB
+  if(!calLoad)handleUSBCmd();  // process the commands received from the USB
   tud_task();      // I suppose that this function has to be called periodicaly
   //}  
   if ( configIsValidPrev != configIsValid) {
@@ -941,7 +1265,31 @@ void loop() {
         setRgbOn();  
     }
   }
+    if (!xgzp6897d.airspeedInstalled || xgzp6897d.calibrated) {
+      blinking = true;
+      if (fields[GPS_TIME].available)
+      {
+          if (fields[LONGITUDE].available) ledState = STATE_OK;
+          else ledState = STATE_PARTLY_OK;
+      }
+      else ledState = STATE_NO_SIGNAL;
+    }
+    else {
+      blinking = false;
+      ledState = STATE_PARTLY_OK;
+    }
 
+    if ( ledState != prevLedState){
+    //printf(" %d\n ",ledState);
+    prevLedState = ledState;
+    setColorState();  
+    }
+  if ( blinking && (( millisRp() - lastBlinkMillis) > 500 ) ){
+    toggleRgb();
+    lastBlinkMillis = millisRp();
+  }
+
+/*
   handleBootButton(); // check boot button; after double click, change LED to fix blue and next HOLD within 5 sec save the current channnels as Failsafe values
   if (( bootButtonState == ARMED) || ( bootButtonState == SAVED)){
     //setRgbColorOn(0, 0, 10); //blue
@@ -953,6 +1301,7 @@ void loop() {
     toggleRgb();
     lastBlinkMillis = millisRp();
   }
+  */
   //if (get_bootsel_button()) {
   //  printf("p\n");
   //} 
@@ -966,20 +1315,32 @@ void setup1(){
 }
 // main loop on core 1 in order to read the sensors and send the data to core0
 void loop1(){
-    uint8_t qCmd;
-    getSensors(); // get sensor
-    if ( ! queue_is_empty(&qSendCmdToCore1)){
-        queue_try_remove(&qSendCmdToCore1, &qCmd);
-        if ( qCmd == 0X01) { // 0X01 is the code to request a calibration
-            mpu.calibrationExecute();
-        }
-    }
-    sendtoSD();
+  uint8_t qCmd;
+  getSensors(); // get sensor
+  if ( ! queue_is_empty(&qSendCmdToCore1)){
+      queue_try_remove(&qSendCmdToCore1, &qCmd);
+      if ( qCmd == 0X01) { // 0X01 is the code to request a calibration
+          mpu.calibrationExecute();
+      }
+      else if ( qCmd == 0X02) { // 0X02 is the code to request load cell calibration
+
+          //Insert HX711 Load Cell Calibration function here
+          calLoad = true;
+          calibrateLoadCell();
+          calLoad = false;
+      }
+  }
+  if (hxm.installed) {
+    getloadCell(); //get HX711 load cell values
+  }
+
+  if (sd == 1) sendtoSD();
 }
 
 void core1_main(){
-    setup1();
-    while(1) loop1();
+  setup1();
+  //setupLoadCell(); //setup load cells HX711
+  while(1) loop1();
 }
 
 int main(){

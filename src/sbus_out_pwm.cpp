@@ -103,7 +103,7 @@ void setLedState(){
     } else {                       // even for Sbus, it could be that we have to ovewrite
         if ( (now - lastPriChannelsMillis) >  FAILSAFE_DELAY ) priFailsafe = true; // if we stop receiving sbus, we force a failsafe
         if ( (now - lastSecChannelsMillis) >  FAILSAFE_DELAY ) secFailsafe = true; // if we stop receiving sbus, we force a failsafe
-    }
+    }/*
     if ( config.pinPrimIn == 255) {
         if (config.pinSecIn == 255) {
             ledState = STATE_NO_SIGNAL;
@@ -130,7 +130,13 @@ void setLedState(){
                 ledState = STATE_PARTLY_OK;
             }
         }
+    }*/
+    if (fields[GPS_TIME].available)
+    {
+        if (fields[LONGITUDE].available) ledState = STATE_OK;
+        else ledState = STATE_PARTLY_OK;
     }
+    
     //printf("%d\n", (int) ledState);
 }
 

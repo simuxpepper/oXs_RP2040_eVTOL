@@ -86,6 +86,15 @@ extern float dteCompensationFactor;
 
 extern sbusFrame_s sbusFrame;
 
+#include "hx711.h"
+#include "hx711_multi.h"
+#include "common.h"
+extern hx711_multi_t hxm;
+extern hx711_multi_config_t hxmcfg;
+
+
+#include "teensy.h"
+extern TEENSY teensy;
 
 void handleUSBCmd(void){
     int c;
@@ -138,6 +147,8 @@ void processCmd(){
         printf("    SCL (baro sensor)         SCL     = 3, 7, 11, 15, 19, 23, 27\n");
         printf("    PWM Channels 1, ..., 16   C1 / C16= 0, 1, 2, ..., 15\n");
         printf("    Voltage 1, ..., 4         V1 / V4 = 26, 27, 28, 29\n");
+        printf("    Load cell clk (SCK)       LOADCLK = 6, 7, 8, 26, 27, 28\n");
+        printf("    Load cell data (DT)       LOADDATA= 6, 7, 8, 26, 27, 28\n");
         printf("- To disable a function, set pin number to 255\n\n");
 
         //printf("-To debug on USB/serial the telemetry frames, enter DEBUGTLM=Y or DEBUGTLM=N (default)\n");
@@ -151,6 +162,7 @@ void processCmd(){
         printf("-To change GPS type: for an Ublox, enter GPS=U (configured by oXs) or E (configured Externally) and for a CADIS, enter GPS=C\n");
         printf("-To change RPM multiplicator, enter e.g. RPM_MULT=0.5 to divide RPM by 2\n");
         printf("-To force a calibration of MP6050, enter MPUCAL\n");
+        printf("-To force a calibration of HX711, enter LOADCAL\n");
         printf("-To use a channel to setup Airspeed compensation factor and/or to select between the 2 Vspeed, enter the channel with ACC=1...16");
     //    printf("-To select the signal generated on:\n");
     //    printf("     GPIO0 : enter GPIO0=SBUS or GPIO0=xx where xx = 01 up to 16\n");
@@ -318,6 +330,39 @@ void processCmd(){
             updateConfig = true;
         }
         */
+    }
+    //hx711 load cell configs
+
+    if (strcmp("LOADCAL", pkey) == 0) {
+        requestHXCalibration();
+        return;
+    }
+
+    // change load cell clock pin
+    if ( strcmp("LOADCLK", pkey) == 0 ) { 
+        ui = strtoul(pvalue, &ptr, 10);
+        if ( *ptr != 0x0){
+            printf("Error : pin must be an unsigned integer\n");
+        } else if ( !(ui == 6 or ui == 7 or ui == 8 or ui == 26 or ui == 27 or ui == 28 or ui == 255)) {
+            printf("Error : pin must 6, 7, 8, 26, 27 or 28");
+        } else {    
+            config.loadclk = ui;
+            printf("Pin for load cell clock = %u\n" , config.loadclk);
+            updateConfig = true;
+        }
+    }
+    // change load cell data pin
+    if ( strcmp("LOADDATA", pkey) == 0 ) { 
+        ui = strtoul(pvalue, &ptr, 10);
+        if ( *ptr != 0x0){
+            printf("Error : pin must be an unsigned integer\n");
+        } else if ( !(ui == 6 or ui == 7 or ui == 8 or ui == 26 or ui == 27 or ui == 28 or ui == 255)) {
+            printf("Error : pin must 6, 7, 8, 26, 27 or 28");
+        } else {    
+            config.loaddata = ui;
+            printf("Pin for load cell data = %u\n" , config.loaddata);
+            updateConfig = true;
+        }
     }
     
     // change for channels
@@ -692,6 +737,8 @@ void checkConfig(){
     addPinToCount(config.pinSda);
     addPinToCount(config.pinScl);
     addPinToCount(config.pinRpm);
+    //addPinToCount(config.loadclk); //load cell SCK
+    //addPinToCount(config.loaddata); //load cell DT
     for (uint8_t i = 0 ; i<16 ; i++) {addPinToCount(config.pinChannels[i]);}
     for (uint8_t i = 0 ; i<16 ; i++) {
         if (config.pinChannels[i] != 255) atLeastOnePwmPin = true ;}
@@ -798,7 +845,9 @@ void printConfig(){
     printf("PWM Channels 9,10,11,12   = %4u %4u %4u %4u\n", config.pinChannels[8] , config.pinChannels[9] , config.pinChannels[10] , config.pinChannels[11]);
     printf("PWM Channels 13,14,15,16  = %4u %4u %4u %4u\n", config.pinChannels[12] , config.pinChannels[13] , config.pinChannels[14] , config.pinChannels[15]);
     printf("Voltage 1, 2, 3, 4        = %4u %4u %4u %4u (V1 / V4 = 26, 27, 28, 29)\n", config.pinVolt[0] , config.pinVolt[1], config.pinVolt[2] , config.pinVolt[3]);
-    
+    printf("Load Cell Clock (SCK)     = %4u  (LOADCLK = 6, 7, 8, 26, 27, 28)\n", config.loadclk );
+    printf("Load Cell Data (DT)       = %4u  (LOADDATA= 6, 7, 8, 26, 27, 28)\n", config.loaddata );
+
     if (config.protocol == 'S'){
             printf("\nProtocol is Sport (Frsky)\n")  ;
         } else if (config.protocol == 'C'){
@@ -856,13 +905,19 @@ void printConfig(){
     } else {
        printf("Acc/Gyro is not detected\n")  ;     
     }
+    printf("    Load cell 1 m, c = %i , %i\n", config.load1_m , config.load1_c);
+    printf("    Load cell 2 m, c = %i , %i\n", config.load2_m , config.load2_c);
+    bool anyAirspeed = false;
     if (ms4525.airspeedInstalled) {
-        printf("Aispeed sensor is detected using MS4525\n")  ;        
-    } else if (sdp3x.airspeedInstalled) {
+        printf("Aispeed sensor is detected using MS4525\n")  ;
+        anyAirspeed = true;        
+    } if (sdp3x.airspeedInstalled) {
         printf("Airspeed sensor is detected using SDP3X\n")  ;
-    } else if (xgzp6897d.airspeedInstalled) {
-        printf("Airspeed sensor is detected using XGZP6897D");
-    } else {
+        anyAirspeed = true;  
+    } if (xgzp6897d.airspeedInstalled) {
+        printf("Airspeed sensor 2 is detected using XGZP6897D\n");
+        anyAirspeed = true;  
+    } if (!anyAirspeed) {
         printf("Airspeed sensor is not detected\n")  ;
     } 
     if (config.VspeedCompChannel != 255){
@@ -914,6 +969,9 @@ void printConfig(){
     } else {
         printf("Led color is normal (not inverted)\n")  ;
     }
+
+    if (teensy.fcInstalled) printf("Teensy Flight Controller is detected.\n");
+
     //if (config.gpio0 == 0){
     //    printf("GPIO0 is used to output a Sbus signal\n");
     //} else if ( config.gpio0 < 17 ){
@@ -1018,7 +1076,7 @@ void removeTrailingWhiteSpace( char * str)
 void setupConfig(){   // The config is uploaded at power on
     if (*flash_target_contents == CONFIG_VERSION ) {
         memcpy( &config , flash_target_contents, sizeof(config));
-    } else {
+    /*} else {
         config.version = CONFIG_VERSION;
         for (uint8_t i=0 ; i<16 ; i++) { config.pinChannels[i] = 0XFF; }
         config.pinGpsTx = 0xFF;
@@ -1074,6 +1132,69 @@ void setupConfig(){   // The config is uploaded at power on
         config.temperature = 255;
         config.VspeedCompChannel = 255;
         config.ledInverted = 'N'; // not inverted
+    }*/ //OLD CONFIG
+    } else {
+        config.version = CONFIG_VERSION;
+        for (uint8_t i=0 ; i<16 ; i++) { config.pinChannels[i] = 0XFF; }
+        config.pinGpsTx = 29; //29
+        config.pinGpsRx = 0;
+        config.pinPrimIn = 5;
+        config.pinSecIn = 0xFF; 
+        config.pinSbusOut = 1;
+        config.pinTlm = 2;
+        for (uint8_t i=0 ; i<4 ; i++) { config.pinVolt[i] = {0xFF}; }
+        config.pinSda = 14;
+        config.pinScl = 15;
+        config.pinRpm = 0xFF;
+        config.pinLed = 16;
+        config.protocol = 'S'; // default = sport
+        config.crsfBaudrate = 420000;
+        config.scaleVolt1 = 1.0;
+        config.scaleVolt2 = 1.0;
+        config.scaleVolt3 = 1.0;
+        config.scaleVolt4 = 1.0;
+        config.offset1 = 0.0;
+        config.offset2 = 0.0;
+        config.offset3 = 0.0;
+        config.offset4 = 0.0;
+        config.gpsType = 'U' ;
+        config.rpmMultiplicator = 1.0;
+        //config.gpio0 = 0;
+        //config.gpio1 = 1;
+        //config.gpio5 = 6;
+        //config.gpio11 = 11;
+        config.failsafeType = 'H';
+        config.failsafeChannels.ch0 = 1<<10 ; // set default failsafe value to 1/2 of 11 bits
+        config.failsafeChannels.ch1 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch2 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch3 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch4 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch6 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch6 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch7 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch8 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch9 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch10 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch11 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch12 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch13 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch14 = config.failsafeChannels.ch0 ;
+        config.failsafeChannels.ch15 = config.failsafeChannels.ch0 ;
+        config.accOffsetX = 0;
+        config.accOffsetY = 0;
+        config.accOffsetZ = 0;
+        config.gyroOffsetX = 0;
+        config.gyroOffsetY = 0;
+        config.gyroOffsetZ= 0;
+        config.temperature = 255;
+        config.VspeedCompChannel = 255;
+        config.ledInverted = 'N'; // not inverted
+        config.loadclk = 255;
+        config.loaddata = 255;
+        config.load1_m = 1;
+        config.load1_c = 0;
+        config.load2_m = 1;
+        config.load2_c = 0;
     }
     
 } 
@@ -1091,16 +1212,35 @@ void requestMpuCalibration()  //
     sleep_ms(1000); // wait that message is printed
     queue_try_add(&qSendCmdToCore1 , &data);
 
-}    
+}
+
+void requestHXCalibration()  // 
+{
+    if (!hxm.installed) {
+        printf("Calibration not done: HX711 load cells not installed or configured properly\n");
+        return ;
+    }
+    uint8_t data = 0X02; // 0X01 = execute caxlibration
+    printf("Before calibration:");
+    printConfigOffsets();
+    sleep_ms(1000); // wait that message is printed
+    queue_try_add(&qSendCmdToCore1 , &data);
+
+}
 
 void printConfigOffsets(){
     printf("\nOffset Values in config:\n");
 	printf("Acc. X = %d, Y = %d, Z = %d\n", (int) config.accOffsetX , (int) config.accOffsetY, (int) config.accOffsetZ);    
     printf("Gyro. X = %d, Y = %d, Z = %d\n", (int) config.gyroOffsetX , (int) config.gyroOffsetY, (int) config.gyroOffsetZ);
+    printf("Load cell 1: m = %d, c = %d\n", (int) config.load1_m, (int) config.load1_c);
+    printf("Load cell 2: m = %d, c = %d\n", (int) config.load2_m, (int) config.load2_c);
 }
 
 void printFieldValues(){
     printf("\n");
+
+    if (teensy.fcInstalled) printf("Teensy Flight Controller is detected.\n");
+
     for (uint8_t i=0; i< NUMBER_MAX_IDX ;i++){
         if (fields[i].onceAvailable ){
             switch (i) {
@@ -1205,6 +1345,9 @@ void printFieldValues(){
                 case AIRSPEED:
                     printf("Airspeed = %d cm/s\n", (int) fields[i].value) ;
                     break;
+                case AIRSPEED_2:
+                    printf("Airspeed 2 = %d cm/s\n", (int) fields[i].value) ;
+                    break;
                 case AIRSPEED_COMPENSATED_VSPEED:
                     printf("Compensated Vspeed = %d cm/s\n", (int) fields[i].value) ;
                     break;
@@ -1216,6 +1359,14 @@ void printFieldValues(){
                     break;
                 case GPS_CUMUL_DIST :
                     printf("Gps cumulative distance = %d\n", (int) fields[i].value) ;
+                    break;
+                case LOAD_CELL_1 :
+                    printf("Load cell 1 RAW value = %d\n", (int) fields[i].value) ;
+                    printf("Load cell 1 value (g) = %d\n", (int) (fields[i].value - config.load1_c)/(config.load1_m));
+                    break;
+                case LOAD_CELL_2 :
+                    printf("Load cell 2 RAW value = %d\n", (int) fields[i].value) ;
+                    printf("Load cell 2 value (g) = %d\n", (int) (fields[i].value - config.load2_c)/(config.load2_m));
                     break;
                             
             } // end switch

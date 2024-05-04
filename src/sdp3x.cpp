@@ -40,6 +40,8 @@ void SDP3X::begin() {
     
     // set the sensor in continous mode with averaging (send a command 0X3615)
     uint8_t cmdData[2] = { 0X36 , 0X15} ; 
+        sleep_ms(3000);
+        printf("reading sdp\n");
     if ( i2c_write_timeout_us (i2c1 , _address, &cmdData[0] , 2 , true , 1000) <0 ) {
         printf("error write command to sdp3x\n");
         return ; 

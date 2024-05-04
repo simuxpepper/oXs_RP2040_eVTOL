@@ -92,6 +92,7 @@ void setupSportList(){     // table used by sport
         PITCH,       // 20 imu        in degree  20
         ROLL,        // imu           in degree  20 
         AIRSPEED,    //       in cm/s
+        AIRSPEED_2,
         HEADING,      //  GPS 0.01 degree        50
         ALTITUDE ,    //  GPS cm                 50
         GPS_HOME_BEARING, // GPS degree          50
@@ -120,6 +121,8 @@ void setupSportList(){     // table used by sport
         SBUS_HOLD_COUNTER,  // Sbus hold counter
         SBUS_FAILSAFE_COUNTER, // Sbus failsafe counter
         GPS_CUMUL_DIST, // GPS cumulative dist                        200
+        LOAD_CELL_1,
+        LOAD_CELL_2,
     };
     for (uint8_t i = 0; i < NUMBER_MAX_IDX ; i++){
         sportPriority[i]= temp[i];
@@ -159,10 +162,13 @@ void setupSportList(){     // table used by sport
     sportFieldId[ADS_2_3] = DIY_ADS_2_3;
     sportFieldId[ADS_2_4] = DIY_ADS_2_4;
     sportFieldId[AIRSPEED] = AIR_SPEED_FIRST_ID;
+    sportFieldId[AIRSPEED_2] = AIR_SPEED_SECOND_ID;
     sportFieldId[AIRSPEED_COMPENSATED_VSPEED] = VARIO_LAST_ID;
     sportFieldId[SBUS_HOLD_COUNTER] = DIY_SBUS_HOLD_COUNTER;
     sportFieldId[SBUS_FAILSAFE_COUNTER] = DIY_SBUS_FAILSAFE_COUNTER;
-    sportFieldId[GPS_CUMUL_DIST] =  DIY_GPS_CUMUL_DISTANCE; 
+    sportFieldId[GPS_CUMUL_DIST] =  DIY_GPS_CUMUL_DISTANCE;
+    sportFieldId[LOAD_CELL_1] = DIY_LOAD_CELL_1;
+    sportFieldId[LOAD_CELL_2] = DIY_LOAD_CELL_2;
 /*
     sportMaxPooling[LATITUDE] = 50;
     sportMaxPooling[LONGITUDE] = 50;
@@ -288,7 +294,8 @@ void setupSportList(){     // table used by sport
 } 
 
 void setupSport() {
-// configure some table to manage priorities and sport fields codes used bu sport    
+// configure some table to manage priorities and sport fields codes used bu sport
+printf("Setup sport list\n");    
     setupSportList();
 // configure the queue to get the data from Sport in the irq handle
     queue_init (&sportRxQueue, sizeof(uint8_t), 250);
@@ -312,11 +319,18 @@ void setupSport() {
     );
 // Set up the state machine for transmit but do not yet start it (it starts only when a request from receiver is received)
     sportOffsetTx = pio_add_program(sportPio, &sport_uart_tx_program);
+
+    //printf("Add program\n");
     sport_uart_tx_program_init(sportPio, sportSmTx, sportOffsetTx, config.pinTlm, 57600 , true); // we use the same pin and baud rate for tx and rx, true means thet UART is inverted 
 
+    //printf("TX program init\n");
 // set an irq on pio to handle a received byte
     irq_set_exclusive_handler( PIO0_IRQ_0 , sportPioRxHandlerIrq) ;
+
+    //printf("IRQ exclusive 0\n");
     irq_set_enabled (PIO0_IRQ_0 , true) ;
+
+    //printf("IRQ enabled 0\n");
 
 // Set up the state machine we're going to use to receive them.
     sportOffsetRx = pio_add_program(sportPio, &sport_uart_rx_program);
@@ -441,6 +455,10 @@ void sendOneSport(uint8_t idx){  // fill one frame and send it
             uintValue =  (uint32_t)( ((float) intValue) * 0.194384 ) ;// from cm/s to 0.1kts/h
             if (intValue < 0) uintValue = 0; 
             break;            
+        case AIRSPEED_2:
+            uintValue =  (uint32_t)( ((float) intValue) * 0.194384 ) ;// from cm/s to 0.1kts/h
+            if (intValue < 0) uintValue = 0; 
+            break;     
     }
     
     uint16_t crc = 0;
@@ -532,10 +550,13 @@ void calculateSportMaxBandwidth(){
     sportMaxPooling[ADS_2_3] = P_ADS_2_3;
     sportMaxPooling[ADS_2_4] = P_ADS_2_4;
     sportMaxPooling[AIRSPEED] = P_AIRSPEED;
+    sportMaxPooling[AIRSPEED_2] = P_AIRSPEED_2;
     sportMaxPooling[AIRSPEED_COMPENSATED_VSPEED] = P_AIRSPEED_COMPENSATED_VSPEED;
     sportMaxPooling[SBUS_HOLD_COUNTER] = P_SBUS_HOLD_COUNTER;
     sportMaxPooling[SBUS_FAILSAFE_COUNTER] = P_SBUS_FAILSAFE_COUNTER;
-    sportMaxPooling[GPS_CUMUL_DIST] = P_GPS_CUMUL_DIST;  
+    sportMaxPooling[GPS_CUMUL_DIST] = P_GPS_CUMUL_DIST;
+    sportMaxPooling[LOAD_CELL_1] = P_LOAD_CELL_1;
+    sportMaxPooling[LOAD_CELL_2] = P_LOAD_CELL_2;
     // sum of inverted values only when field is used
     sportMaxBandwidth = 0;
     for (uint8_t i=0; i<NUMBER_MAX_IDX ; i++){
